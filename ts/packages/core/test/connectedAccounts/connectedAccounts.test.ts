@@ -1171,6 +1171,119 @@ describe('ConnectedAccounts', () => {
         connectedAccounts.update('conn_abc123', { enabled: 'yes' } as unknown)
       ).rejects.toThrow('Failed to parse connected account update params');
     });
+
+    it('should not patch the account when only enabled is given', async () => {
+      extendedMockClient.connectedAccounts.updateStatus.mockResolvedValueOnce({ success: true });
+
+      await connectedAccounts.update('conn_abc123', { enabled: true });
+
+      expect(extendedMockClient.connectedAccounts.patch).not.toHaveBeenCalled();
+    });
+
+    it('should set an alias through the PATCH endpoint', async () => {
+      const mockResponse = { success: true, id: 'ca_abc123', status: 'ACTIVE' };
+      extendedMockClient.connectedAccounts.patch.mockResolvedValueOnce(mockResponse);
+
+      const result = await connectedAccounts.update('ca_abc123', { alias: 'work-gmail' });
+
+      expect(extendedMockClient.connectedAccounts.patch).toHaveBeenCalledWith(
+        'ca_abc123',
+        { alias: 'work-gmail' },
+        undefined
+      );
+      expect(extendedMockClient.connectedAccounts.updateStatus).not.toHaveBeenCalled();
+      expect(result).toEqual(mockResponse);
+    });
+
+    it('should pass an empty alias through, which clears it', async () => {
+      extendedMockClient.connectedAccounts.patch.mockResolvedValueOnce({
+        success: true,
+        id: 'ca_abc123',
+        status: 'ACTIVE',
+      });
+
+      await connectedAccounts.update('ca_abc123', { alias: '' });
+
+      expect(extendedMockClient.connectedAccounts.patch).toHaveBeenCalledWith(
+        'ca_abc123',
+        { alias: '' },
+        undefined
+      );
+    });
+
+    it('should replace credentials through the PATCH endpoint', async () => {
+      const mockResponse = { success: true, id: 'ca_abc123', status: 'ACTIVE' };
+      extendedMockClient.connectedAccounts.patch.mockResolvedValueOnce(mockResponse);
+      const connection = {
+        state: { authScheme: 'BEARER_TOKEN' as const, val: { token: 'new-access-token' } },
+      };
+
+      const result = await connectedAccounts.update('ca_abc123', { connection });
+
+      expect(extendedMockClient.connectedAccounts.patch).toHaveBeenCalledWith(
+        'ca_abc123',
+        { connection },
+        undefined
+      );
+      expect(extendedMockClient.connectedAccounts.updateStatus).not.toHaveBeenCalled();
+      expect(result).toEqual(mockResponse);
+    });
+
+    it('should patch first and then set the status when both are given', async () => {
+      const calls: string[] = [];
+      extendedMockClient.connectedAccounts.patch.mockImplementationOnce(async () => {
+        calls.push('patch');
+        return { success: true, id: 'ca_abc123', status: 'INACTIVE' };
+      });
+      extendedMockClient.connectedAccounts.updateStatus.mockImplementationOnce(async () => {
+        calls.push('updateStatus');
+        return { success: true };
+      });
+      const requestOptions = { signal: new AbortController().signal };
+
+      const result = await connectedAccounts.update(
+        'ca_abc123',
+        {
+          enabled: true,
+          alias: 'work-gmail',
+          connection: { state: { authScheme: 'API_KEY', val: { generic_api_key: 'new-key' } } },
+        },
+        requestOptions
+      );
+
+      expect(calls).toEqual(['patch', 'updateStatus']);
+      expect(extendedMockClient.connectedAccounts.patch).toHaveBeenCalledWith(
+        'ca_abc123',
+        {
+          alias: 'work-gmail',
+          connection: { state: { authScheme: 'API_KEY', val: { generic_api_key: 'new-key' } } },
+        },
+        requestOptions
+      );
+      expect(extendedMockClient.connectedAccounts.updateStatus).toHaveBeenCalledWith(
+        'ca_abc123',
+        { enabled: true },
+        requestOptions
+      );
+      expect(result).toEqual({ success: true });
+    });
+
+    it('should not set the status when the PATCH fails', async () => {
+      extendedMockClient.connectedAccounts.patch.mockRejectedValueOnce(new Error('patch failed'));
+
+      await expect(
+        connectedAccounts.update('ca_abc123', { enabled: true, alias: 'work-gmail' })
+      ).rejects.toThrow('patch failed');
+      expect(extendedMockClient.connectedAccounts.updateStatus).not.toHaveBeenCalled();
+    });
+
+    it('should throw ValidationError and send nothing when no field is given', async () => {
+      await expect(connectedAccounts.update('ca_abc123', {})).rejects.toThrow(
+        'Failed to parse connected account update params'
+      );
+      expect(extendedMockClient.connectedAccounts.patch).not.toHaveBeenCalled();
+      expect(extendedMockClient.connectedAccounts.updateStatus).not.toHaveBeenCalled();
+    });
   });
 
   describe('link', () => {

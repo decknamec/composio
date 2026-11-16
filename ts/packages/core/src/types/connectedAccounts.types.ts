@@ -1,4 +1,8 @@
 import { z } from 'zod/v3';
+import type {
+  ConnectedAccountPatchParams,
+  ConnectedAccountUpdateStatusParams,
+} from '@composio/client/resources/connected-accounts';
 import { ConnectionDataSchema } from './connectedAccountAuthStates.types';
 import { AuthSchemeEnum } from './authConfigs.types';
 
@@ -364,11 +368,45 @@ export const ConnectedAccountRefreshOptionsSchema = z.object({
 });
 export type ConnectedAccountRefreshOptions = z.infer<typeof ConnectedAccountRefreshOptionsSchema>;
 
-// Use the Stainless-generated type as the source of truth for update params.
-export type { ConnectedAccountUpdateStatusParams as UpdateConnectedAccountParams } from '@composio/client/resources/connected-accounts';
+/**
+ * Params for `composio.connectedAccounts.update()`. Pass at least one field.
+ *
+ * `alias` and `connection` go to `PATCH /api/v3.1/connected_accounts/{nanoid}`;
+ * `enabled` goes to the status endpoint. The field types come from the generated client.
+ */
+export type UpdateConnectedAccountParams = {
+  /** Enables (`true`) or disables (`false`) the connected account. */
+  enabled?: ConnectedAccountUpdateStatusParams['enabled'];
+  /**
+   * A human-readable alias, unique per entity and toolkit within the project.
+   * An empty string clears the alias.
+   */
+  alias?: ConnectedAccountPatchParams['alias'];
+  /**
+   * Replacement credentials. `authScheme` must match the connection's auth scheme.
+   * Only the fields in `val` change; a field set to `null` is removed.
+   */
+  connection?: ConnectedAccountPatchParams['connection'];
+};
 
 export const UpdateConnectedAccountParamsSchema = z.object({
-  enabled: z.boolean(),
+  enabled: z.boolean().optional(),
+  alias: z.string().optional(),
+  connection: z
+    .object({
+      state: z.object({
+        authScheme: z.enum([
+          'BEARER_TOKEN',
+          'API_KEY',
+          'BASIC',
+          'BASIC_WITH_JWT',
+          'GOOGLE_SERVICE_ACCOUNT',
+          'SERVICE_ACCOUNT',
+        ]),
+        val: z.record(z.string(), z.string().nullable()),
+      }),
+    })
+    .optional(),
 });
 
 /**

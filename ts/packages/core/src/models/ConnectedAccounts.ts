@@ -808,25 +808,41 @@ export class ConnectedAccounts {
   }
 
   /**
-   * Enable or disable a connected account. Accepts `{ enabled: boolean }`.
+   * Update a connected account: its alias, its credentials, or whether it is enabled.
+   *
+   * `alias` and `connection` go to `PATCH /api/v3.1/connected_accounts/{nanoid}`;
+   * `enabled` goes to the status endpoint. With both kinds of field, the PATCH runs first
+   * and the status call second, so a failed PATCH leaves the status unchanged, and the
+   * response of the status call is returned.
    *
    * Use `updateAcl()` for ACL writes on SHARED connections.
    *
    * @param {string} nanoid - The unique identifier of the connected account
-   * @param {UpdateConnectedAccountParams} params - The update parameters
-   * @returns {Promise<ConnectedAccountUpdateStatusResponse>} The update response
+   * @param {UpdateConnectedAccountParams} params - The update parameters; pass at least one field
+   * @param {ComposioRequestOptions} [requestOptions] - Optional `signal` that cancels the update
+   * @returns {Promise<ConnectedAccountUpdateStatusResponse | ConnectedAccountPatchResponse>} The update response
    *
    * @example
    * ```typescript
    * // Disable an account
    * await composio.connectedAccounts.update('ca_abc123', { enabled: false });
+   *
+   * // Set an alias (an empty string clears it)
+   * await composio.connectedAccounts.update('ca_abc123', { alias: 'work-gmail' });
+   *
+   * // Replace the credentials
+   * await composio.connectedAccounts.update('ca_abc123', {
+   *   connection: {
+   *     state: { authScheme: 'BEARER_TOKEN', val: { token: 'new-access-token' } },
+   *   },
+   * });
    * ```
    */
   async update(
     nanoid: string,
     params: UpdateConnectedAccountParams,
     requestOptions?: ComposioRequestOptions
-  ): Promise<ConnectedAccountUpdateStatusResponse> {
+  ): Promise<ConnectedAccountUpdateStatusResponse | ConnectedAccountPatchResponse> {
     const parsedParams = UpdateConnectedAccountParamsSchema.safeParse(params);
     if (!parsedParams.success) {
       throw new ValidationError('Failed to parse connected account update params', {
@@ -834,9 +850,35 @@ export class ConnectedAccounts {
       });
     }
 
-    return withCancellation(
-      () => this.client.connectedAccounts.updateStatus(nanoid, parsedParams.data, requestOptions),
+    const { enabled, alias, connection } = parsedParams.data;
+    const setStatus = (value: boolean) =>
+      withCancellation(
+        () =>
+          this.client.connectedAccounts.updateStatus(nanoid, { enabled: value }, requestOptions),
+        requestOptions?.signal
+      );
+
+    if (alias === undefined && connection === undefined) {
+      if (enabled === undefined) {
+        throw new ValidationError(
+          'Failed to parse connected account update params: pass at least one of `enabled`, `alias` or `connection`'
+        );
+      }
+      return setStatus(enabled);
+    }
+
+    const patched = await withCancellation(
+      () =>
+        this.client.connectedAccounts.patch(
+          nanoid,
+          {
+            ...(alias !== undefined && { alias }),
+            ...(connection !== undefined && { connection }),
+          },
+          requestOptions
+        ),
       requestOptions?.signal
     );
+    return enabled === undefined ? patched : setStatus(enabled);
   }
 }
